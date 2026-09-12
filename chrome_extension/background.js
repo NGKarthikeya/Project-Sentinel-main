@@ -12,14 +12,56 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("🛡️ Scam Shield initialized");
 });
 
+function validateApiBase(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") {
+    throw new Error("API Base URL is required.");
+  }
+  const trimmed = urlStr.trim();
+  let url;
+  try {
+    url = new URL(trimmed);
+  } catch (err) {
+    throw new Error("Invalid URL format.");
+  }
+
+  if (url.username || url.password) {
+    throw new Error("API base must not contain user credentials.");
+  }
+
+  const scheme = url.protocol.toLowerCase();
+  const host = url.hostname.toLowerCase();
+
+  const isLocalhost =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]";
+
+  if (scheme === "http:") {
+    if (!isLocalhost) {
+      throw new Error("HTTP is only allowed for localhost. Remote servers require HTTPS.");
+    }
+  } else if (scheme !== "https:") {
+    throw new Error(`Unsupported URL scheme: ${scheme}. Only HTTPS (and HTTP for localhost) is allowed.`);
+  }
+
+  return url.origin;
+}
+
 function getConfig() {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     chrome.storage.local.get(["apiKey"], (localItems) => {
       chrome.storage.sync.get(["apiBase"], (syncItems) => {
-        resolve({
-          apiKey: (localItems.apiKey || "").trim(),
-          apiBase: (syncItems.apiBase || DEFAULT_API_BASE).trim(),
-        });
+        try {
+          const rawBase = (syncItems.apiBase || DEFAULT_API_BASE).trim();
+          const apiBase = validateApiBase(rawBase);
+          resolve({
+            apiKey: (localItems.apiKey || "").trim(),
+            apiBase: apiBase,
+          });
+        } catch (err) {
+          reject(err);
+        }
       });
     });
   });

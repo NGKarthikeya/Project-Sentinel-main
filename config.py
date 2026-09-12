@@ -223,6 +223,14 @@ class AppConfig:
                 "REDIS_URL has no credentials and ENVIRONMENT=production. "
                 "Set a password or explicitly allow this via REDIS_ALLOW_NO_AUTH=true."
             )
+        if self.environment == "production":
+            if (
+                os.getenv("REQUIRE_REDIS_IN_PRODUCTION", "").lower() == "true"
+                or self.graph.backend == "redis"
+            ):
+                import storage
+                if not storage._redis_available():
+                    raise ConfigError("Production environment requires a connected Redis instance.")
         return self
 
     def to_dict(self) -> dict:

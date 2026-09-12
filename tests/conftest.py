@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("API_KEY", "test-api-key")
 os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("ALLOW_DEV_OPERATOR_FALLBACK", "true")
 
 import pytest
 from swarm_graph import PheromoneGraph

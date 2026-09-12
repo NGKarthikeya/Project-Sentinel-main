@@ -177,8 +177,7 @@ document.addEventListener("DOMContentLoaded", () => {
      */
     async function initWebSocket() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const apiKey = window.sessionStorage.getItem("swarmsentinel_api_key") || "";
-        const ticketResponse = await fetch("/ws-ticket", { method: "POST", headers: { "x-api-key": apiKey } });
+        const ticketResponse = await fetch("/ws-ticket", { method: "POST", headers: getAuthHeaders() });
         if (!ticketResponse.ok) {
             setTimeout(initWebSocket, 3000);
             return;
@@ -247,11 +246,32 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
+     * Helper to retrieve auth headers for REST requests
+     */
+    function getAuthHeaders() {
+        const apiKey = window.sessionStorage.getItem("swarmsentinel_api_key") ||
+                       window.localStorage.getItem("swarmsentinel_api_key") ||
+                       "";
+        const headers = {};
+        if (apiKey) {
+            headers["x-api-key"] = apiKey;
+        }
+        return headers;
+    }
+
+    /**
      * Loads list of emails from backend GET /emails
      */
     async function loadEmailList(autoSelectId = null) {
         try {
-            const res = await fetch("/emails");
+            const res = await fetch("/emails", { headers: getAuthHeaders() });
+            if (res.status === 401 || res.status === 403) {
+                const key = prompt("API Key required to access Sentinel Geolocation Trace:");
+                if (key) {
+                    window.sessionStorage.setItem("swarmsentinel_api_key", key.trim());
+                    return loadEmailList(autoSelectId);
+                }
+            }
             if (!res.ok) throw new Error("Failed to fetch emails");
             emails = await res.json();
 
@@ -319,7 +339,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderEmailList();
 
         try {
-            const res = await fetch(`/emails/${emailId}/trace`);
+            const res = await fetch(`/emails/${emailId}/trace`, { headers: getAuthHeaders() });
             if (!res.ok) throw new Error("Failed to fetch email trace");
             const traceData = await res.json();
             currentTraceData = traceData;
@@ -753,7 +773,7 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
                 const res = await fetch("/emails/analyze", {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
                     body: JSON.stringify({
                         subject: subject,
                         sender: sender,

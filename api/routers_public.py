@@ -14,6 +14,8 @@ from controller import handle_message
 from email_analyzer import analyze_email as analyze_email_func
 from schemas import EmailAnalysisRequest, MessageRequest, ScamAnalysisResponse
 from storage import get_flagged_intelligence_stats
+from forensic.evidence import create_evidence_metadata
+from storage import save_evidence_metadata, save_email_analysis
 
 router = APIRouter()
 logger = logging.getLogger("honeypot_api")
@@ -35,8 +37,15 @@ async def health_details(api_key: str = Depends(verify_api_key)):
 
 
 @router.post("/ws-ticket")
-async def websocket_ticket(api_key: str = Depends(verify_api_key)):
-    return {"ticket": create_websocket_ticket(), "expires_in": 60}
+async def websocket_ticket(
+    request: Request,
+    api_key: str = Depends(verify_api_key),
+):
+    client_ip = get_client_ip(request)
+    if is_rate_limited(client_ip):
+        logger.warning(logfmt("ws_ticket_rate_limited", client_ip=client_ip))
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+    return {"ticket": create_websocket_ticket(client_ip=client_ip), "expires_in": 60}
 
 
 @router.get("/metrics")
@@ -125,6 +134,12 @@ async def analyze_email(
 
     try:
         response = analyze_email_func(body)
+        if body.message_id:
+            analysis_data = response.model_dump(mode="json") if hasattr(response, "model_dump") else dict(response)
+            save_email_analysis(body.message_id, analysis_data)
+            raw_data = (body.raw_eml or body.raw_headers or "").encode("utf-8", errors="surrogateescape")
+            if raw_data:
+                save_evidence_metadata(body.message_id, create_evidence_metadata(body.message_id, raw_data, source="analyze-email"))
         logger.info(logfmt("email_analysis_ok", client_ip=client_ip, is_scam=response.get("is_scam") if isinstance(response, dict) else None))
         return response
     except HTTPException:

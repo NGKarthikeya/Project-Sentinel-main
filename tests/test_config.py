@@ -31,6 +31,17 @@ def test_config_allows_authenticated_redis_in_production(monkeypatch):
     assert validated.redis_url == "redis://user:pass@localhost:6379"
 
 
+def test_config_requires_redis_in_production_when_specified(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("REDIS_URL", "redis://user:pass@localhost:6379")
+    monkeypatch.setenv("API_KEY", "real-secret-value")
+    monkeypatch.setenv("REQUIRE_REDIS_IN_PRODUCTION", "true")
+    cfg = AppConfig.from_env()
+    with pytest.raises(ConfigError) as exc_info:
+        cfg.validate_runtime_requirements()
+    assert "Production environment requires a connected Redis instance" in str(exc_info.value)
+
+
 def test_config_uses_safe_defaults_for_invalid_numeric_values(monkeypatch):
     monkeypatch.setenv("API_KEY", "real-secret-value")
     monkeypatch.setenv("RATE_LIMIT_REQUESTS", "not-a-number")

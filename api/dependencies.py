@@ -17,8 +17,12 @@ config.validate_runtime_requirements()
 
 API_KEY = config.api.api_key
 OPERATOR_API_KEY = os.getenv("OPERATOR_API_KEY", "").strip()
+FORENSIC_READ_API_KEY = os.getenv("FORENSIC_READ_API_KEY", "").strip()
 _WS_TICKET_TTL_SECONDS = 60
-_WS_TICKETS: dict[str, float] = {}
+_WS_TICKETS: dict[str, tuple[float, str]] = {}
+_ws_ticket_lock = Lock()
+_MAX_WS_TICKETS_GLOBAL = 10_000
+_MAX_WS_TICKETS_PER_IP = 50
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=True)
 
 _rate_limit_buckets: DefaultDict[str, deque[float]] = defaultdict(deque)
@@ -33,6 +37,10 @@ _TRUSTED_PROXIES = {
 _MAX_TRACKED_IPS = 50_000
 
 
+def _dev_operator_fallback_enabled() -> bool:
+    return os.getenv("ALLOW_DEV_OPERATOR_FALLBACK", "").strip().lower() == "true"
+
+
 def verify_api_key(api_key: str = Depends(api_key_header)) -> str:
     if not hmac.compare_digest(api_key, API_KEY):
         raise HTTPException(status_code=403, detail="Invalid API key.")
@@ -40,11 +48,29 @@ def verify_api_key(api_key: str = Depends(api_key_header)) -> str:
 
 
 def verify_operator_api_key(api_key: str = Depends(api_key_header)) -> str:
-    if config.environment == "production" and not OPERATOR_API_KEY:
-        raise HTTPException(status_code=503, detail="Operator authentication is not configured.")
-    operator_key = OPERATOR_API_KEY or API_KEY
+    operator_key = os.getenv("OPERATOR_API_KEY", "").strip()
+    if not operator_key:
+        if not _dev_operator_fallback_enabled():
+            raise HTTPException(status_code=503, detail="Operator authentication is not configured.")
+        operator_key = API_KEY
+
     if not hmac.compare_digest(api_key, operator_key):
         raise HTTPException(status_code=403, detail="Operator API key required.")
+    return api_key
+
+
+def verify_forensic_read_api_key(api_key: str = Depends(api_key_header)) -> str:
+    forensic_key = os.getenv("FORENSIC_READ_API_KEY", "").strip()
+    operator_key = os.getenv("OPERATOR_API_KEY", "").strip()
+
+    valid_keys = [k for k in (forensic_key, operator_key) if k]
+    if not valid_keys:
+        if not _dev_operator_fallback_enabled():
+            raise HTTPException(status_code=503, detail="Forensic report authentication is not configured.")
+        valid_keys = [API_KEY]
+
+    if not any(hmac.compare_digest(api_key, key) for key in valid_keys):
+        raise HTTPException(status_code=403, detail="Forensic read or operator API key required.")
     return api_key
 
 
@@ -61,21 +87,36 @@ async def authorize_websocket(websocket: WebSocket) -> bool:
         return False
 
     supplied_ticket = websocket.query_params.get("ticket", "")
-    expires_at = _WS_TICKETS.pop(supplied_ticket, None) if supplied_ticket else None
-    if expires_at is None or expires_at < time.time():
+    with _ws_ticket_lock:
+        ticket_info = _WS_TICKETS.pop(supplied_ticket, None) if supplied_ticket else None
+
+    if ticket_info is None:
+        await websocket.close(code=1008, reason="Authentication required")
+        return False
+    expires_at, _ = ticket_info
+    if expires_at < time.time():
         await websocket.close(code=1008, reason="Authentication required")
         return False
     return True
 
 
-def create_websocket_ticket() -> str:
+def create_websocket_ticket(client_ip: str = "unknown") -> str:
     now = time.time()
-    for ticket, expires_at in list(_WS_TICKETS.items()):
-        if expires_at < now:
-            del _WS_TICKETS[ticket]
-    ticket = secrets.token_urlsafe(32)
-    _WS_TICKETS[ticket] = now + _WS_TICKET_TTL_SECONDS
-    return ticket
+    with _ws_ticket_lock:
+        for ticket, (expires_at, ip) in list(_WS_TICKETS.items()):
+            if expires_at < now:
+                del _WS_TICKETS[ticket]
+
+        if len(_WS_TICKETS) >= _MAX_WS_TICKETS_GLOBAL:
+            raise HTTPException(status_code=429, detail="Global WebSocket ticket limit reached.")
+
+        ip_count = sum(1 for _, (_, ip) in _WS_TICKETS.items() if ip == client_ip)
+        if ip_count >= _MAX_WS_TICKETS_PER_IP:
+            raise HTTPException(status_code=429, detail="WebSocket ticket limit reached for IP.")
+
+        ticket = secrets.token_urlsafe(32)
+        _WS_TICKETS[ticket] = (now + _WS_TICKET_TTL_SECONDS, client_ip)
+        return ticket
 
 
 def get_client_ip(request: Request) -> str:

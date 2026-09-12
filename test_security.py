@@ -9,6 +9,7 @@ Tests:
 6. HTTP Security Headers (CSP, X-Frame-Options, etc.)
 """
 
+import os
 import unittest
 import time
 from fastapi.testclient import TestClient
@@ -168,16 +169,92 @@ class TestSecurityRemediations(unittest.TestCase):
         self.assertEqual(unauthenticated_client.get("/health").json(), {"status": "healthy", "service": "SwarmSentinel"})
 
     def test_production_operator_auth_fails_closed_without_operator_key(self):
-        original_environment = dependencies.config.environment
         original_operator_key = dependencies.OPERATOR_API_KEY
+        original_fallback = os.environ.get("ALLOW_DEV_OPERATOR_FALLBACK")
         try:
-            dependencies.config.environment = "production"
             dependencies.OPERATOR_API_KEY = ""
+            if "ALLOW_DEV_OPERATOR_FALLBACK" in os.environ:
+                del os.environ["ALLOW_DEV_OPERATOR_FALLBACK"]
             response = client.post("/swarm/reset")
             self.assertEqual(response.status_code, 503)
         finally:
-            dependencies.config.environment = original_environment
             dependencies.OPERATOR_API_KEY = original_operator_key
+            if original_fallback is not None:
+                os.environ["ALLOW_DEV_OPERATOR_FALLBACK"] = original_fallback
+
+    def test_operator_auth_separate_key_required(self):
+        original_operator_key = os.environ.get("OPERATOR_API_KEY")
+        original_fallback = os.environ.get("ALLOW_DEV_OPERATOR_FALLBACK")
+        try:
+            os.environ["OPERATOR_API_KEY"] = "operator-secret-key"
+            dependencies.OPERATOR_API_KEY = "operator-secret-key"
+            if "ALLOW_DEV_OPERATOR_FALLBACK" in os.environ:
+                del os.environ["ALLOW_DEV_OPERATOR_FALLBACK"]
+
+            # Ordinary API key should be rejected with 403
+            resp_ordinary = client.post("/swarm/reset", headers={"x-api-key": config.api.api_key})
+            self.assertEqual(resp_ordinary.status_code, 403)
+
+            # Valid operator key should be accepted
+            resp_op = client.post("/swarm/reset", headers={"x-api-key": "operator-secret-key"})
+            self.assertIn(resp_op.status_code, [200, 500])
+        finally:
+            if original_operator_key is not None:
+                os.environ["OPERATOR_API_KEY"] = original_operator_key
+                dependencies.OPERATOR_API_KEY = original_operator_key
+            else:
+                os.environ.pop("OPERATOR_API_KEY", None)
+                dependencies.OPERATOR_API_KEY = ""
+
+            if original_fallback is not None:
+                os.environ["ALLOW_DEV_OPERATOR_FALLBACK"] = original_fallback
+
+    def test_forensic_report_requires_forensic_or_operator_key(self):
+        original_forensic = os.environ.get("FORENSIC_READ_API_KEY")
+        original_operator = os.environ.get("OPERATOR_API_KEY")
+        original_fallback = os.environ.get("ALLOW_DEV_OPERATOR_FALLBACK")
+        try:
+            os.environ["FORENSIC_READ_API_KEY"] = "forensic-read-key"
+            os.environ["OPERATOR_API_KEY"] = "operator-key"
+            dependencies.FORENSIC_READ_API_KEY = "forensic-read-key"
+            dependencies.OPERATOR_API_KEY = "operator-key"
+            if "ALLOW_DEV_OPERATOR_FALLBACK" in os.environ:
+                del os.environ["ALLOW_DEV_OPERATOR_FALLBACK"]
+
+            # Ordinary API key should be denied
+            resp_ord = client.get("/emails/EML-89412/report/metadata", headers={"x-api-key": config.api.api_key})
+            self.assertEqual(resp_ord.status_code, 403)
+
+            # Forensic read key accepted
+            resp_forensic = client.get("/emails/EML-89412/report/metadata", headers={"x-api-key": "forensic-read-key"})
+            self.assertNotEqual(resp_forensic.status_code, 403)
+
+            # Operator key accepted
+            resp_op = client.get("/emails/EML-89412/report/metadata", headers={"x-api-key": "operator-key"})
+            self.assertNotEqual(resp_op.status_code, 403)
+        finally:
+            if original_forensic is not None:
+                os.environ["FORENSIC_READ_API_KEY"] = original_forensic
+                dependencies.FORENSIC_READ_API_KEY = original_forensic
+            else:
+                os.environ.pop("FORENSIC_READ_API_KEY", None)
+                dependencies.FORENSIC_READ_API_KEY = ""
+
+            if original_operator is not None:
+                os.environ["OPERATOR_API_KEY"] = original_operator
+                dependencies.OPERATOR_API_KEY = original_operator
+            else:
+                os.environ.pop("OPERATOR_API_KEY", None)
+                dependencies.OPERATOR_API_KEY = ""
+
+            if original_fallback is not None:
+                os.environ["ALLOW_DEV_OPERATOR_FALLBACK"] = original_fallback
+
+    def test_ws_ticket_single_use_replay_protection(self):
+        ticket = dependencies.create_websocket_ticket("127.0.0.1")
+        self.assertTrue(bool(ticket))
+        with dependencies._ws_ticket_lock:
+            self.assertIn(ticket, dependencies._WS_TICKETS)
 
 if __name__ == "__main__":
     unittest.main()

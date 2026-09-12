@@ -64,20 +64,68 @@ function loadApiSettings() {
   });
 }
 
+function validateApiBase(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") {
+    throw new Error("API Base URL is required.");
+  }
+  const trimmed = urlStr.trim();
+  let url;
+  try {
+    url = new URL(trimmed);
+  } catch (err) {
+    throw new Error("Invalid URL format.");
+  }
+
+  if (url.username || url.password) {
+    throw new Error("API base must not contain user credentials.");
+  }
+
+  const scheme = url.protocol.toLowerCase();
+  const host = url.hostname.toLowerCase();
+
+  const isLocalhost =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]";
+
+  if (scheme === "http:") {
+    if (!isLocalhost) {
+      throw new Error("HTTP is only allowed for localhost. Remote servers require HTTPS.");
+    }
+  } else if (scheme !== "https:") {
+    throw new Error(`Unsupported URL scheme: ${scheme}. Only HTTPS (and HTTP for localhost) is allowed.`);
+  }
+
+  return url.origin;
+}
+
 function setupApiSettings() {
   const saveButton = document.getElementById('save-api-settings');
   if (!saveButton) return;
 
   saveButton.addEventListener('click', () => {
-    const apiBase = (document.getElementById('api-base')?.value || '').trim();
+    const rawApiBase = (document.getElementById('api-base')?.value || '').trim();
     const apiKey = (document.getElementById('api-key')?.value || '').trim();
     const status = document.getElementById('api-save-status');
 
-    if (!apiBase || !apiKey) {
+    let apiBase;
+    try {
+      apiBase = validateApiBase(rawApiBase);
+    } catch (err) {
       if (status) {
         status.style.display = 'block';
         status.className = 'alert alert-error';
-        status.textContent = 'Both API base and API key are required';
+        status.textContent = err.message;
+      }
+      return;
+    }
+
+    if (!apiKey) {
+      if (status) {
+        status.style.display = 'block';
+        status.className = 'alert alert-error';
+        status.textContent = 'API key is required';
       }
       return;
     }

@@ -18,6 +18,7 @@ from api.routers_dashboard import dashboard_dir, router as dashboard_router
 from api.routers_incidents import router as incidents_router
 from api.routers_ingest import router as ingest_router
 from api.routers_public import router as public_router
+from api.routers_reports import router as reports_router
 from api.routers_swarm import router as swarm_router
 from api.dependencies import authorize_websocket, verify_api_key
 from api.services import startup, shutdown
@@ -340,6 +341,7 @@ if os.path.isdir(email_static_dir):
     app.mount("/email-static", StaticFiles(directory=email_static_dir), name="email_static")
 
 app.include_router(public_router)
+app.include_router(reports_router)
 app.include_router(ingest_router)
 app.include_router(swarm_router)
 app.include_router(incidents_router)
