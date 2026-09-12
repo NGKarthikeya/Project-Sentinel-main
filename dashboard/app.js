@@ -64,7 +64,12 @@ function authHeaders(withJson = true) {
 }
 
 function websocketUrl(path) {
-  return `${WS_SCHEME}://${location.host}${path}?api_key=${encodeURIComponent(API_KEY)}`;
+  return fetch(`${API}/ws-ticket`, { method: 'POST', headers: authHeaders(false) })
+    .then(response => {
+      if (!response.ok) throw new Error('Unable to authorize WebSocket');
+      return response.json();
+    })
+    .then(data => `${WS_SCHEME}://${location.host}${path}?ticket=${encodeURIComponent(data.ticket)}`);
 }
 
 // Entity colors — muted, professional
@@ -343,11 +348,13 @@ function switchTab(tab) {
 
 function connectWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
-  ws = new WebSocket(websocketUrl('/ws/live'));
-  ws.onopen = () => { setConn(true); toast('Connected', 'ok'); if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; } };
-  ws.onmessage = e => { try { route(JSON.parse(e.data)); } catch(err) { console.error(err); } };
-  ws.onclose = () => { setConn(false); schedReconn(); };
-  ws.onerror = () => setConn(false);
+  websocketUrl('/ws/live').then(url => {
+    ws = new WebSocket(url);
+    ws.onopen = () => { setConn(true); toast('Connected', 'ok'); if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; } };
+    ws.onmessage = e => { try { route(JSON.parse(e.data)); } catch(err) { console.error(err); } };
+    ws.onclose = () => { setConn(false); schedReconn(); };
+    ws.onerror = () => setConn(false);
+  }).catch(() => schedReconn());
 }
 
 function schedReconn() { if (reconnTimer) return; reconnTimer = setTimeout(() => { reconnTimer = null; connectWS(); }, 3000); }
@@ -491,13 +498,19 @@ function renderInc() {
   if (emptyEl) emptyEl.style.display = incidents.length ? 'none' : 'block';
 
   if (!el) return;
-  el.innerHTML = incidents.slice(0, 25).map(inc => {
+  el.innerHTML = incidents.slice(0, 25).map((inc, index) => {
     const s = inc.score || 0;
     const sev = s >= 80 ? 'crit' : s >= 60 ? 'high' : 'med';
-    const ents = (inc.entities || []).map(e => `${e.type}:${e.id}`).join(', ');
-    const tags = (inc.mitre || []).map(t => `<span class="tag">${t}</span>`).join('');
-    return `<div class="inc-item" style="cursor:pointer" onclick="highlightEntities([${(inc.entities||[]).map(e=>`'${e.type}:${e.id}'`).join(',')}])"><div class="inc-top"><span class="inc-id">INC-${inc.id}</span><span class="inc-score ${sev}">${s.toFixed(0)}</span></div><div class="inc-entities">${ents}</div>${tags ? `<div class="inc-tags">${tags}</div>` : ''}</div>`;
+    const ents = (inc.entities || []).map(e => `${esc(e.type)}:${esc(e.id)}`).join(', ');
+    const tags = (inc.mitre || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    return `<div class="inc-item incident-item" data-incident-index="${index}" style="cursor:pointer"><div class="inc-top"><span class="inc-id">INC-${esc(inc.id)}</span><span class="inc-score ${sev}">${s.toFixed(0)}</span></div><div class="inc-entities">${ents}</div>${tags ? `<div class="inc-tags">${tags}</div>` : ''}</div>`;
   }).join('');
+  el.querySelectorAll('.incident-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const incident = incidents[Number(item.dataset.incidentIndex)];
+      highlightEntities((incident.entities || []).map(entity => `${entity.type}:${entity.id}`));
+    });
+  });
 }
 
 // ═══════════════════════════════════════
@@ -609,22 +622,25 @@ function showDetailPanel(node) {
   if (!p) return;
   const rawId = node.id.includes(':') ? node.id.split(':').slice(1).join(':') : node.id;
   setText('detailTitle', rawId);
-  let html = `<div class="prop-row"><span class="prop-lbl">Type</span><span class="prop-val">${node.type}</span></div>`;
+  let html = `<div class="prop-row"><span class="prop-lbl">Type</span><span class="prop-val">${esc(node.type)}</span></div>`;
   html += `<div class="prop-row"><span class="prop-lbl">Pheromone</span><span class="prop-val">${(node.pheromone||0).toFixed(1)}</span></div>`;
   if (node.metadata && Object.keys(node.metadata).length > 0) {
-    html += `<div class="prop-lbl" style="margin-top:12px">Metadata</div><div class="meta-block">${JSON.stringify(node.metadata, null, 2)}</div>`;
+    html += `<div class="prop-lbl" style="margin-top:12px">Metadata</div><div class="meta-block">${esc(JSON.stringify(node.metadata, null, 2))}</div>`;
   }
   
   // Find connected edges
   const connected = links.filter(l => (l.source.id||l.source) === node.id || (l.target.id||l.target) === node.id);
   html += `<div class="prop-lbl" style="margin-top:12px">Connected Edges (${connected.length})</div>`;
-  connected.slice(0, 20).forEach(l => {
+  connected.slice(0, 20).forEach((l, index) => {
     const isSrc = (l.source.id||l.source) === node.id;
     const otherId = isSrc ? (l.target.id||l.target) : (l.source.id||l.source);
-    html += `<div class="feed-item" style="margin-top:4px;cursor:pointer" onclick="highlightEntities(['${otherId}'])"><div class="feed-body"><div class="feed-title">${esc(otherId)}</div><div class="feed-desc">Weight: ${(l.weight||0).toFixed(1)} | ${(l.signal_types||[]).join(', ')}</div></div></div>`;
+    html += `<div class="feed-item connected-edge" data-other-id="${esc(otherId)}" data-edge-index="${index}" style="margin-top:4px;cursor:pointer"><div class="feed-body"><div class="feed-title">${esc(otherId)}</div><div class="feed-desc">Weight: ${(l.weight||0).toFixed(1)} | ${esc((l.signal_types||[]).join(', '))}</div></div></div>`;
   });
 
   setHtml('detailBody', html);
+  p.querySelectorAll('.connected-edge').forEach(edge => {
+    edge.addEventListener('click', () => highlightEntities([edge.dataset.otherId]));
+  });
   p.classList.add('open');
 }
 

@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 from threading import Lock
 import hmac
 import os
+import secrets
 import time
 from typing import DefaultDict
 
@@ -16,6 +17,8 @@ config.validate_runtime_requirements()
 
 API_KEY = config.api.api_key
 OPERATOR_API_KEY = os.getenv("OPERATOR_API_KEY", "").strip()
+_WS_TICKET_TTL_SECONDS = 60
+_WS_TICKETS: dict[str, float] = {}
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=True)
 
 _rate_limit_buckets: DefaultDict[str, deque[float]] = defaultdict(deque)
@@ -37,6 +40,8 @@ def verify_api_key(api_key: str = Depends(api_key_header)) -> str:
 
 
 def verify_operator_api_key(api_key: str = Depends(api_key_header)) -> str:
+    if config.environment == "production" and not OPERATOR_API_KEY:
+        raise HTTPException(status_code=503, detail="Operator authentication is not configured.")
     operator_key = OPERATOR_API_KEY or API_KEY
     if not hmac.compare_digest(api_key, operator_key):
         raise HTTPException(status_code=403, detail="Operator API key required.")
@@ -55,11 +60,22 @@ async def authorize_websocket(websocket: WebSocket) -> bool:
         await websocket.close(code=1008, reason="Origin not allowed")
         return False
 
-    supplied_key = websocket.query_params.get("api_key", "")
-    if not supplied_key or not hmac.compare_digest(supplied_key, API_KEY):
+    supplied_ticket = websocket.query_params.get("ticket", "")
+    expires_at = _WS_TICKETS.pop(supplied_ticket, None) if supplied_ticket else None
+    if expires_at is None or expires_at < time.time():
         await websocket.close(code=1008, reason="Authentication required")
         return False
     return True
+
+
+def create_websocket_ticket() -> str:
+    now = time.time()
+    for ticket, expires_at in list(_WS_TICKETS.items()):
+        if expires_at < now:
+            del _WS_TICKETS[ticket]
+    ticket = secrets.token_urlsafe(32)
+    _WS_TICKETS[ticket] = now + _WS_TICKET_TTL_SECONDS
+    return ticket
 
 
 def get_client_ip(request: Request) -> str:

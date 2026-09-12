@@ -14,6 +14,7 @@ import time
 from fastapi.testclient import TestClient
 from main import app, EMAILS_DB, MAX_STORED_EMAILS, RATE_LIMIT_STORE
 from config import config
+import api.dependencies as dependencies
 from geo_intel import is_trusted_mta, geolocate_ip, is_valid_ip
 
 client = TestClient(app, headers={"x-api-key": config.api.api_key})
@@ -154,6 +155,29 @@ class TestSecurityRemediations(unittest.TestCase):
     def test_csv_payload_is_bounded(self):
         response = client.post("/ingest/csv", json={"csv": "x\n" + ("1\n" * 500_001)})
         self.assertEqual(response.status_code, 422)
+
+    def test_generic_json_normalization_rejects_unsafe_entity_ids(self):
+        response = client.post(
+            "/ingest/json",
+            json={"entity_type": "ip", "entity_id": "<script>alert(1)</script>"},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_health_details_requires_authentication(self):
+        self.assertEqual(unauthenticated_client.get("/health/details").status_code, 401)
+        self.assertEqual(unauthenticated_client.get("/health").json(), {"status": "healthy", "service": "SwarmSentinel"})
+
+    def test_production_operator_auth_fails_closed_without_operator_key(self):
+        original_environment = dependencies.config.environment
+        original_operator_key = dependencies.OPERATOR_API_KEY
+        try:
+            dependencies.config.environment = "production"
+            dependencies.OPERATOR_API_KEY = ""
+            response = client.post("/swarm/reset")
+            self.assertEqual(response.status_code, 503)
+        finally:
+            dependencies.config.environment = original_environment
+            dependencies.OPERATOR_API_KEY = original_operator_key
 
 if __name__ == "__main__":
     unittest.main()

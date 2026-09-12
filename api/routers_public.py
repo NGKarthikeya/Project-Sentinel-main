@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from api.dependencies import get_client_ip, is_rate_limited, verify_api_key
+from api.dependencies import create_websocket_ticket, get_client_ip, is_rate_limited, verify_api_key
 from api.logging_utils import logfmt
 from api.runtime import runtime_state
 from api.services import build_health_payload, build_metrics_payload
@@ -26,7 +26,17 @@ async def root():
 
 @router.get("/health")
 async def health():
+    return {"status": "healthy", "service": "SwarmSentinel"}
+
+
+@router.get("/health/details")
+async def health_details(api_key: str = Depends(verify_api_key)):
     return build_health_payload()
+
+
+@router.post("/ws-ticket")
+async def websocket_ticket(api_key: str = Depends(verify_api_key)):
+    return {"ticket": create_websocket_ticket(), "expires_in": 60}
 
 
 @router.get("/metrics")

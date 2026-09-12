@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
@@ -115,6 +116,24 @@ class JSONIngestRequest(RootModel[Dict[str, Any]]):
     def validate_non_empty(self) -> "JSONIngestRequest":
         if not self.root:
             raise ValueError("Request body must be a non-empty JSON object.")
+        try:
+            encoded = json.dumps(self.root, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Request body must contain JSON-compatible values.") from exc
+        if len(encoded) > 256_000:
+            raise ValueError("JSON request body exceeds the 256KB limit.")
+
+        def count_nodes(value: Any, depth: int = 0) -> int:
+            if depth > 12:
+                raise ValueError("JSON request nesting exceeds the maximum depth.")
+            if isinstance(value, dict):
+                return 1 + sum(count_nodes(key, depth + 1) + count_nodes(item, depth + 1) for key, item in value.items())
+            if isinstance(value, list):
+                return 1 + sum(count_nodes(item, depth + 1) for item in value)
+            return 1
+
+        if count_nodes(self.root) > 5_000:
+            raise ValueError("JSON request contains too many values.")
         return self
 
 

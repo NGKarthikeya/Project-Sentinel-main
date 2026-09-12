@@ -316,6 +316,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         status_code=422,
         content={
             "detail": "Request validation failed.",
+            "errors": exc.errors(),
         },
     )
 

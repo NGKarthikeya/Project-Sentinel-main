@@ -175,10 +175,16 @@ document.addEventListener("DOMContentLoaded", () => {
     /**
      * Establishes real-time WebSocket connection to /ws endpoint
      */
-    function initWebSocket() {
+    async function initWebSocket() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const apiKey = window.sessionStorage.getItem("swarmsentinel_api_key") || "";
-        const wsUrl = `${protocol}//${window.location.host}/ws?api_key=${encodeURIComponent(apiKey)}`;
+        const ticketResponse = await fetch("/ws-ticket", { method: "POST", headers: { "x-api-key": apiKey } });
+        if (!ticketResponse.ok) {
+            setTimeout(initWebSocket, 3000);
+            return;
+        }
+        const ticketData = await ticketResponse.json();
+        const wsUrl = `${protocol}//${window.location.host}/ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
 
         updateWsStatus("connecting", "WebSocket: Connecting...");
         socket = new WebSocket(wsUrl);

@@ -162,20 +162,34 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
-        """Load configuration from environment variables."""
+        """Load configuration from environment variables with safe bounds."""
         cfg = cls()
+
+        def safe_int(name: str, default: int) -> int:
+            value = os.getenv(name)
+            try:
+                return int(value.strip()) if value else default
+            except (AttributeError, ValueError):
+                return default
+
+        def safe_float(name: str, default: float) -> float:
+            value = os.getenv(name)
+            try:
+                return float(value.strip()) if value else default
+            except (AttributeError, ValueError):
+                return default
 
         # API
         cfg.api.api_key = (os.getenv("API_KEY") or "").strip()
         cfg.api.google_ai_studio_key = (os.getenv("GOOGLE_AI_STUDIO_KEY") or "").strip()
-        cfg.api.rate_limit_requests = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
-        cfg.api.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+        cfg.api.rate_limit_requests = max(1, safe_int("RATE_LIMIT_REQUESTS", 30))
+        cfg.api.rate_limit_window_seconds = max(1, safe_int("RATE_LIMIT_WINDOW_SECONDS", 60))
         cors_env = os.getenv("CORS_ALLOWED_ORIGINS")
         if cors_env:
             cfg.api.cors_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
 
         # Graph
-        cfg.graph.decay_rate = float(os.getenv("GRAPH_DECAY_RATE", "0.95"))
+        cfg.graph.decay_rate = min(1.0, max(0.01, safe_float("GRAPH_DECAY_RATE", 0.95)))
         cfg.graph.backend = os.getenv("GRAPH_BACKEND", "memory")
 
         # Environment
@@ -184,8 +198,8 @@ class AppConfig:
         cfg.redis_url = os.getenv("REDIS_URL")
 
         # Correlation
-        cfg.correlation.window_seconds = float(os.getenv("CORRELATION_WINDOW", "300"))
-        cfg.correlation.create_threshold = float(os.getenv("CORRELATION_THRESHOLD", "60"))
+        cfg.correlation.window_seconds = max(10.0, safe_float("CORRELATION_WINDOW", 300.0))
+        cfg.correlation.create_threshold = min(100.0, max(1.0, safe_float("CORRELATION_THRESHOLD", 60.0)))
 
         return cfg
 

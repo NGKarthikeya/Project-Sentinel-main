@@ -29,3 +29,20 @@ def test_config_allows_authenticated_redis_in_production(monkeypatch):
     cfg = AppConfig.from_env()
     validated = cfg.validate_runtime_requirements()
     assert validated.redis_url == "redis://user:pass@localhost:6379"
+
+
+def test_config_uses_safe_defaults_for_invalid_numeric_values(monkeypatch):
+    monkeypatch.setenv("API_KEY", "real-secret-value")
+    monkeypatch.setenv("RATE_LIMIT_REQUESTS", "not-a-number")
+    monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "-10")
+    monkeypatch.setenv("GRAPH_DECAY_RATE", "invalid")
+    monkeypatch.setenv("CORRELATION_WINDOW", "1")
+    monkeypatch.setenv("CORRELATION_THRESHOLD", "101")
+
+    cfg = AppConfig.from_env()
+
+    assert cfg.api.rate_limit_requests == 30
+    assert cfg.api.rate_limit_window_seconds == 1
+    assert cfg.graph.decay_rate == 0.95
+    assert cfg.correlation.window_seconds == 10.0
+    assert cfg.correlation.create_threshold == 100.0
