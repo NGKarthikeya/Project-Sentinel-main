@@ -15,6 +15,12 @@ let lastBannerState = { type: 'pending', message: 'Analyzing email…' };
 let observer = null;
 let observerTarget = null;
 
+function escapeHtml(value) {
+  const div = document.createElement('div');
+  div.textContent = String(value ?? '');
+  return div.innerHTML;
+}
+
 /**
  * Extract email data from Gmail DOM
  */
@@ -86,8 +92,7 @@ async function analyzeCurrentEmail() {
 
   showPendingBanner("Analyzing email…");
   
-  console.log("📧 Analyzing email from:", emailData.from_email, "Subject:", emailData.subject);
-  console.log("📝 Message length:", emailData.message_text.length, "Links found:", emailData.links.length);
+  console.log("📧 Analyzing email", "Message length:", emailData.message_text.length, "Links found:", emailData.links.length);
   
   // Send to background script
   chrome.runtime.sendMessage(
@@ -96,9 +101,8 @@ async function analyzeCurrentEmail() {
       data: emailData
     },
     (response) => {
-      console.log("📨 Response from background:", response);
       if (response.success) {
-        console.log("✅ Analysis successful:", response.data);
+        console.log("✅ Analysis successful");
         showAnalysisResult(response.data, emailData);
       } else {
         console.error("❌ Analysis failed:", response.error);
@@ -239,10 +243,10 @@ function createStatusBanner({ title, message, icon, color, bgColor, borderColor 
         <span style="font-size: 18px; flex-shrink: 0;">${icon}</span>
         <div style="flex: 1;">
           <div style="font-weight: 600; color: ${color}; margin-bottom: 4px;">
-            ${title}
+            ${escapeHtml(title)}
           </div>
           <div style="color: #555; font-size: 12px;">
-            ${message}
+            ${escapeHtml(message)}
           </div>
         </div>
       </div>
@@ -303,7 +307,7 @@ function createAnalysisBanner(analysis) {
           
           ${analysis.reasons && analysis.reasons.length > 0 ? `
             <div style="color: #555; font-size: 12px; margin-bottom: 4px;">
-              ${analysis.reasons.join(' • ')}
+              ${escapeHtml(analysis.reasons.join(' • '))}
             </div>
           ` : ''}
           
@@ -314,13 +318,13 @@ function createAnalysisBanner(analysis) {
           
           ${analysis.extracted_intelligence?.upi_ids?.length > 0 ? `
             <div style="color: #c33; font-size: 12px; margin-top: 4px;">
-              🚨 Found UPI IDs: ${analysis.extracted_intelligence.upi_ids.join(', ')}
+              🚨 Found UPI IDs: ${escapeHtml(analysis.extracted_intelligence.upi_ids.join(', '))}
             </div>
           ` : ''}
           
           ${analysis.extracted_intelligence?.phishing_links?.length > 0 ? `
             <div style="color: #c33; font-size: 12px; margin-top: 4px;">
-              🔗 Found suspicious links: ${analysis.extracted_intelligence.phishing_links.slice(0, 2).join(', ')}
+              🔗 Found suspicious links: ${escapeHtml(analysis.extracted_intelligence.phishing_links.slice(0, 2).join(', '))}
             </div>
           ` : ''}
         </div>
@@ -461,9 +465,11 @@ function highlightText(texts, bgColor, textColor, container) {
     processed.add(node);
     
     try {
-      const regex = new RegExp(`(${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+      const escapedText = escapeHtml(node.textContent);
+      const escapedTarget = escapeHtml(text);
+      const regex = new RegExp(`(${escapedTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
       const span = document.createElement('span');
-      span.innerHTML = node.textContent.replace(regex, 
+        span.innerHTML = escapedText.replace(regex,
         `<span class="scam-shield-highlight" style="background: ${bgColor}; color: ${textColor}; font-weight: bold; padding: 2px 4px; border-radius: 2px;">$1</span>`
       );
       node.parentNode.replaceChild(span, node);

@@ -115,7 +115,7 @@ async def analyze_email(
 
     try:
         response = analyze_email_func(body)
-        logger.info(logfmt("email_analysis_ok", client_ip=client_ip, from_email=body.from_email, is_scam=response.get("is_scam") if isinstance(response, dict) else None))
+        logger.info(logfmt("email_analysis_ok", client_ip=client_ip, is_scam=response.get("is_scam") if isinstance(response, dict) else None))
         return response
     except HTTPException:
         raise

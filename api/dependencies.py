@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from threading import Lock
+import hmac
+import os
 import time
 from typing import DefaultDict
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, WebSocket
 from fastapi.security import APIKeyHeader
 
 from config import config
@@ -13,13 +15,12 @@ from config import config
 config.validate_runtime_requirements()
 
 API_KEY = config.api.api_key
+OPERATOR_API_KEY = os.getenv("OPERATOR_API_KEY", "").strip()
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=True)
 
 _rate_limit_buckets: DefaultDict[str, deque[float]] = defaultdict(deque)
 _rate_limit_lock = Lock()
 
-
-import os
 
 _TRUSTED_PROXIES = {
     ip.strip()
@@ -30,9 +31,35 @@ _MAX_TRACKED_IPS = 50_000
 
 
 def verify_api_key(api_key: str = Depends(api_key_header)) -> str:
-    if api_key != API_KEY:
+    if not hmac.compare_digest(api_key, API_KEY):
         raise HTTPException(status_code=403, detail="Invalid API key.")
     return api_key
+
+
+def verify_operator_api_key(api_key: str = Depends(api_key_header)) -> str:
+    operator_key = OPERATOR_API_KEY or API_KEY
+    if not hmac.compare_digest(api_key, operator_key):
+        raise HTTPException(status_code=403, detail="Operator API key required.")
+    return api_key
+
+
+async def authorize_websocket(websocket: WebSocket) -> bool:
+    """Authenticate browser WebSockets before accepting them."""
+    origin = websocket.headers.get("origin")
+    allowed_origins = {
+        value.strip()
+        for value in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8000").split(",")
+        if value.strip()
+    }
+    if origin and "*" not in allowed_origins and origin not in allowed_origins:
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return False
+
+    supplied_key = websocket.query_params.get("api_key", "")
+    if not supplied_key or not hmac.compare_digest(supplied_key, API_KEY):
+        await websocket.close(code=1008, reason="Authentication required")
+        return False
+    return True
 
 
 def get_client_ip(request: Request) -> str:

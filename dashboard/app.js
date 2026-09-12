@@ -4,10 +4,9 @@
  */
 
 const WS_SCHEME = location.protocol === 'https:' ? 'wss' : 'ws';
-const WS_URL = `${WS_SCHEME}://${location.host}/ws/live`;
 const API = `${location.protocol}//${location.host}`;
 const API_KEY_STORAGE_KEY = 'swarmsentinel_api_key';
-let API_KEY = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim();
+let API_KEY = (sessionStorage.getItem(API_KEY_STORAGE_KEY) || '').trim();
 
 let resolveApiKeyPromise = null;
 
@@ -48,7 +47,7 @@ function saveSettings() {
     return;
   }
   API_KEY = entered.trim();
-  localStorage.setItem(API_KEY_STORAGE_KEY, API_KEY);
+  sessionStorage.setItem(API_KEY_STORAGE_KEY, API_KEY);
   hideSettings();
   toast('API key configured', 'ok');
   if (resolveApiKeyPromise) {
@@ -62,6 +61,10 @@ function authHeaders(withJson = true) {
   if (withJson) headers['Content-Type'] = 'application/json';
   if (API_KEY) headers['x-api-key'] = API_KEY;
   return headers;
+}
+
+function websocketUrl(path) {
+  return `${WS_SCHEME}://${location.host}${path}?api_key=${encodeURIComponent(API_KEY)}`;
 }
 
 // Entity colors — muted, professional
@@ -305,9 +308,9 @@ function showTip(event, d) {
   const t = $('tooltip');
   const name = d.id.includes(':') ? d.id.split(':').slice(1).join(':') : d.id;
   t.innerHTML = `<span class="t-name">${esc(name)}</span><br>`
-    + `<span class="t-dim">Type</span> <span class="t-val">${d.type}</span><br>`
+    + `<span class="t-dim">Type</span> <span class="t-val">${esc(d.type)}</span><br>`
     + `<span class="t-dim">Pheromone</span> <span class="t-val">${(d.pheromone||0).toFixed(1)}</span>`
-    + (d.metadata && Object.keys(d.metadata).length ? `<br><span class="t-dim">Meta</span> <span class="t-val">${JSON.stringify(d.metadata)}</span>` : '');
+    + (d.metadata && Object.keys(d.metadata).length ? `<br><span class="t-dim">Meta</span> <span class="t-val">${esc(JSON.stringify(d.metadata))}</span>` : '');
   t.style.display = 'block';
 
   // Position relative to graph pane
@@ -340,7 +343,7 @@ function switchTab(tab) {
 
 function connectWS() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
-  ws = new WebSocket(WS_URL);
+  ws = new WebSocket(websocketUrl('/ws/live'));
   ws.onopen = () => { setConn(true); toast('Connected', 'ok'); if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; } };
   ws.onmessage = e => { try { route(JSON.parse(e.data)); } catch(err) { console.error(err); } };
   ws.onclose = () => { setConn(false); schedReconn(); };
@@ -709,12 +712,15 @@ async function fetchPredictions() {
       setText('predBadge', d.predictions.length);
       const el = $('predList');
       if (el) {
-        el.innerHTML = d.predictions.map(p => 
-          `<div class="inc-item" style="cursor:pointer" onclick="highlightEntities(['${p.entity_id}'])">
+        el.innerHTML = d.predictions.map(p =>
+          `<div class="inc-item prediction-item" data-entity-id="${esc(p.entity_id)}" style="cursor:pointer">
             <div class="inc-top"><span class="inc-id">${esc(p.entity_id.split(':').slice(1).join(':'))}</span><span class="inc-score crit">${p.risk_score.toFixed(1)}</span></div>
-            <div class="inc-entities" style="font-size:10px">${p.reason}</div>
+            <div class="inc-entities" style="font-size:10px">${esc(p.reason)}</div>
           </div>`
         ).join('');
+        el.querySelectorAll('.prediction-item').forEach(item => {
+          item.addEventListener('click', () => highlightEntities([item.dataset.entityId]));
+        });
         $('predEmpty').style.display = 'none';
       }
     }

@@ -213,6 +213,7 @@ class IngestionEngine:
             Maps CSV columns to TelemetryEvent fields.
             Example: {"source_ip": "entity_id", "severity": "score"}
         """
+        max_csv_rows = 5000
         events = []
         default_map = {
             "src_ip": "entity_id", "source_ip": "entity_id", "ip": "entity_id",
@@ -226,7 +227,9 @@ class IngestionEngine:
 
         try:
             reader = csv.DictReader(io.StringIO(csv_text))
-            for row in reader:
+            for row_number, row in enumerate(reader, start=1):
+                if row_number > max_csv_rows:
+                    raise ValueError(f"CSV exceeds maximum row count of {max_csv_rows}.")
                 entity_id = None
                 entity_type = "ip"
                 score = 20.0

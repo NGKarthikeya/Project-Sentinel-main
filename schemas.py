@@ -137,8 +137,8 @@ class SyslogIngestRequest(StrictRequestModel):
 
 
 class CSVIngestRequest(StrictRequestModel):
-    csv: str = Field(min_length=1)
-    column_map: Optional[Dict[str, str]] = None
+    csv: str = Field(min_length=1, max_length=1_000_000)
+    column_map: Optional[Dict[str, str]] = Field(default=None, max_length=50)
 
 
 class ActionRequest(StrictRequestModel):

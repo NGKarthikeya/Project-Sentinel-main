@@ -3,8 +3,8 @@ const DEFAULT_API_BASE = "http://localhost:8000";
 
 // Store API key securely in extension storage
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.set({ apiKey: "" });
   chrome.storage.sync.set({
-    apiKey: "",
     apiBase: DEFAULT_API_BASE,
     autoAnalyze: true,
     highlightScams: true
@@ -14,10 +14,12 @@ chrome.runtime.onInstalled.addListener(() => {
 
 function getConfig() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(["apiKey", "apiBase"], (items) => {
-      resolve({
-        apiKey: (items.apiKey || "").trim(),
-        apiBase: (items.apiBase || DEFAULT_API_BASE).trim(),
+    chrome.storage.local.get(["apiKey"], (localItems) => {
+      chrome.storage.sync.get(["apiBase"], (syncItems) => {
+        resolve({
+          apiKey: (localItems.apiKey || "").trim(),
+          apiBase: (syncItems.apiBase || DEFAULT_API_BASE).trim(),
+        });
       });
     });
   });
@@ -28,7 +30,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "analyzeEmail") {
     analyzeEmail(request.data)
       .then(result => {
-        console.log("✅ Analysis result:", result);
+        console.log("✅ Email analysis completed");
         sendResponse({ success: true, data: result });
       })
       .catch(error => {
@@ -69,7 +71,7 @@ async function analyzeEmail(emailData) {
     links: links || []
   };
   
-  console.log("📤 Sending to API:", payload);
+  console.log("📤 Sending email analysis request");
   
   const response = await fetch(`${apiBase}/analyze-email`, {
     method: "POST",
@@ -85,7 +87,7 @@ async function analyzeEmail(emailData) {
   }
   
   const result = await response.json();
-  console.log("✅ API Response:", result);
+  console.log("✅ Email analysis completed");
   return result;
 }
 

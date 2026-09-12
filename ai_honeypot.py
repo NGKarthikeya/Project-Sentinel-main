@@ -171,7 +171,6 @@ CONVERSATION SO FAR:
 Generate the victim's response (no quotes, no explanations):"""
 
     logger.info(f"📤 Sending prompt to Gemma (length: {len(prompt)} chars)")
-    logger.info(f"📌 Last scammer message: '{sanitized_last_scammer_msg}'")
     
     response = model.generate_content(
         prompt,
@@ -182,10 +181,7 @@ Generate the victim's response (no quotes, no explanations):"""
     )
     
     logger.info(f"📥 Received response from Gemma")
-    logger.info(f"Response text: '{response.text}'")
-    
     reply = response.text.strip()
-    logger.info(f"Stripped reply: '{reply}' (length: {len(reply)})")
     
     # Remove quotes if LLM wrapped the reply
     if reply.startswith('"') and reply.endswith('"'):
@@ -193,7 +189,7 @@ Generate the victim's response (no quotes, no explanations):"""
     if reply.startswith("'") and reply.endswith("'"):
         reply = reply[1:-1]
     
-    logger.info(f"Final reply after quote removal: '{reply}' (length: {len(reply)})")
+    logger.info(f"Generated response length: {len(reply)}")
     return reply
 
 

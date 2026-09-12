@@ -50,15 +50,17 @@ function loadSettings() {
 }
 
 function loadApiSettings() {
-  chrome.storage.sync.get(['apiBase', 'apiKey'], (items) => {
-    const baseInput = document.getElementById('api-base');
-    const keyInput = document.getElementById('api-key');
-    if (baseInput) baseInput.value = items.apiBase || 'http://localhost:8000';
-    if (keyInput) keyInput.value = items.apiKey || '';
-    
-    if (!items.apiKey) {
-      document.getElementById('api-warning').style.display = 'block';
-    }
+  chrome.storage.sync.get(['apiBase'], (syncItems) => {
+    chrome.storage.local.get(['apiKey'], (localItems) => {
+      const baseInput = document.getElementById('api-base');
+      const keyInput = document.getElementById('api-key');
+      if (baseInput) baseInput.value = syncItems.apiBase || 'http://localhost:8000';
+      if (keyInput) keyInput.value = localItems.apiKey || '';
+
+      if (!localItems.apiKey) {
+        document.getElementById('api-warning').style.display = 'block';
+      }
+    });
   });
 }
 
@@ -80,17 +82,19 @@ function setupApiSettings() {
       return;
     }
 
-    chrome.storage.sync.set({ apiBase, apiKey }, () => {
-      document.getElementById('api-warning').style.display = 'none';
-      if (status) {
-        status.style.display = 'block';
-        status.className = 'alert alert-success';
-        status.textContent = 'Settings saved';
-      }
-      setTimeout(() => {
-        if (status) status.style.display = 'none';
-      }, 2000);
-      loadFlaggedStats();
+    chrome.storage.local.set({ apiKey }, () => {
+      chrome.storage.sync.set({ apiBase }, () => {
+        document.getElementById('api-warning').style.display = 'none';
+        if (status) {
+          status.style.display = 'block';
+          status.className = 'alert alert-success';
+          status.textContent = 'Settings saved';
+        }
+        setTimeout(() => {
+          if (status) status.style.display = 'none';
+        }, 2000);
+        loadFlaggedStats();
+      });
     });
   });
 }
